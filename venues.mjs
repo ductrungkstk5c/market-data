@@ -145,7 +145,8 @@ class BigDecimal {
     const c = new Array(a + b).fill(0);
     for (let i = b; i--; ) {
       let carry = 0;
-      for (let j = a + i; j > i; ) {
+      let j = a + i;
+      while (j > i) {
         const prod = c[j] + yc[i] * xc[j - i - 1] + carry;
         c[j--] = prod % 10;
         carry = (prod / 10) | 0;
@@ -198,6 +199,7 @@ const isOptional = (fn) => (v) => v === undefined || fn(v);
 const isNullable = (fn) => (v) => v === null || fn(v);
 const isNullish = (fn) => (v) => v === null || v === undefined || fn(v);
 const isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+const isRecord = (v) => typeof v === "object" && v !== null;
 
 function filterRows(items, shape) {
   if (!Array.isArray(items)) return null;
@@ -470,21 +472,23 @@ const ADAPTERS = [
         trading_disabled: isOptional(isBool),
       });
       if (!list) return fail("coinbase list: unexpected shape");
-      if (!isObj(payloads.ticker)) return fail("coinbase ticker: unexpected shape");
+      const stats = payloads.ticker;
+      const validDay = (d) => d === undefined || (isRecord(d) && isOptional(isNumeric)(d.last) && isOptional(isNumeric)(d.volume));
+      if (!isRecord(stats) || !Object.values(stats).every((e) => isRecord(e) && validDay(e.stats_24hour))) {
+        return fail("coinbase ticker: unexpected shape");
+      }
 
       const rows = [];
       for (const product of list) {
-        const entry = own(payloads.ticker, product.id);
-        if (entry !== undefined && !isObj(entry)) return fail("coinbase ticker: unexpected shape");
-        const day = entry?.stats_24hour;
-        if (product.status !== "online" || product.trading_disabled === true || !isObj(day)) continue;
+        const day = own(stats, product.id)?.stats_24hour;
+        if (product.status !== "online" || product.trading_disabled === true || !day) continue;
 
         rows.push({
           pair: product.id,
           base: product.base_currency,
           quote: product.quote_currency,
-          last: isNumeric(day.last) ? day.last : undefined,
-          baseVolume: isNumeric(day.volume) ? day.volume : undefined,
+          last: day.last,
+          baseVolume: day.volume,
         });
       }
       return ok(buildTickers("coinbase", rows, only));
